@@ -1,5 +1,5 @@
 {
-   "abstract" : "It's new $module",
+   "abstract" : "pure Perl TLS protocol implementation",
    "author" : [
       "Vladimir Lettiev <thecrux@gmail.com>"
    ],
@@ -42,16 +42,32 @@
       },
       "runtime" : {
          "requires" : {
+            "Crypt::X509" : "0",
+            "CryptX" : "0",
+            "MIME::Base64" : "0",
+            "Module::Runtime" : "0",
             "perl" : "5.008001"
          }
       },
       "test" : {
          "requires" : {
+            "AnyEvent" : "7.00",
             "Test::More" : "0.98"
          }
       }
    },
    "release_status" : "unstable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/vlet/p5-Protocol-TLS/issues"
+      },
+      "homepage" : "https://github.com/vlet/p5-Protocol-TLS",
+      "repository" : {
+         "type" : "git",
+         "url" : "git://github.com/vlet/p5-Protocol-TLS.git",
+         "web" : "https://github.com/vlet/p5-Protocol-TLS"
+      }
+   },
    "version" : "0.01",
    "x_authority" : "cpan:CRUX"
 }
