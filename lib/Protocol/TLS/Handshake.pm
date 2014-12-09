@@ -73,19 +73,19 @@ sub encode {
 }
 
 sub hello_request_decode {
-    die "not implemented";
+    0;
 }
 
 sub hello_request_encode {
-    die "not implemented";
+    '';
 }
 
 sub client_hello_decode {
     my ( $ctx, $buf_ref, $buf_offset, $length ) = @_;
-    my ( $version, $rand, $sess_id, $ciphers_l ) =
+    my ( $tls_version, $random, $session_id, $ciphers_l ) =
       unpack "x$buf_offset na32 C/a n", $$buf_ref;
 
-    my $sess_l = length($sess_id) || 0;
+    my $sess_l = length($session_id) || 0;
 
     # Length error
     if ( $sess_l > 32 ) {
@@ -131,16 +131,16 @@ sub client_hello_decode {
     }
 
     # TODO: need sane result handling
-    $ctx->validate_client_hello(
-        ciphers           => \@ciphers,
-        compression       => \@compr,
-        client_session_id => $sess_id,
-        version           => $version,
-        random            => $rand,
-        extensions        => $ext_result,
+    my $res = $ctx->validate_client_hello(
+        ciphers     => \@ciphers,
+        compression => \@compr,
+        session_id  => $session_id,
+        tls_version => $tls_version,
+        random      => $random,
+        extensions  => $ext_result,
     );
 
-    return $offset;
+    return $res ? $offset : undef;
 }
 
 sub client_hello_encode {
@@ -154,11 +154,11 @@ sub client_hello_encode {
 
     pack(
         'na32 C/a n'
-          . ( scalar @{ $data_ref->{ciphers} } + 1 ) . 'C'
-          . ( scalar @{ $data_ref->{compression} } + 1 ),
-        TLS_v12,
+          . ( @{ $data_ref->{ciphers} } + 1 ) . 'C'
+          . ( @{ $data_ref->{compression} } + 1 ),
+        $data_ref->{tls_version},
         $ctx->{pending}->{securityParameters}->{client_random},
-        $data_ref->{session},
+        $data_ref->{session_id},
         2 * @{ $data_ref->{ciphers} },
         @{ $data_ref->{ciphers} },
         scalar @{ $data_ref->{compression} },
@@ -186,7 +186,7 @@ sub server_hello_decode {
     }
 
     # TODO: need sane result handling
-    $ctx->validate_server_hello(
+    my $res = $ctx->validate_server_hello(
         cipher      => $cipher,
         compression => $compr,
         session_id  => $sess_id,
@@ -195,7 +195,7 @@ sub server_hello_decode {
         extensions  => $ext_result,
     );
 
-    return $offset;
+    return $res ? $offset : undef;
 }
 
 sub server_hello_encode {
@@ -208,10 +208,9 @@ sub server_hello_encode {
     }
 
     pack( "n a32 C/a n C",
-        TLS_v12,
-        $data_ref->{server_random},
-        $data_ref->{session_id},
-        $data_ref->{cipher}, $data_ref->{compr} )
+        $data_ref->{tls_version}, $data_ref->{server_random},
+        $data_ref->{session_id},  $data_ref->{cipher},
+        $data_ref->{compression} )
       . $ext;
 }
 
@@ -313,8 +312,7 @@ sub finished_encode {
 sub finished_decode {
     my ( $ctx, $buf_ref, $buf_offset, $length ) = @_;
     my $message = substr $$buf_ref, $buf_offset, $length;
-    $ctx->validate_finished($message);
-    $length;
+    return $ctx->validate_finished($message) ? $length : undef;
 }
 
 1

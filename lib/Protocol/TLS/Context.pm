@@ -3,7 +3,7 @@ use 5.008001;
 use strict;
 use warnings;
 use Carp;
-use Protocol::TLS::Trace qw(tracer);
+use Protocol::TLS::Trace qw(tracer bin2hex);
 use Protocol::TLS::RecordLayer;
 use Protocol::TLS::Extension;
 use Protocol::TLS::Crypto;
@@ -41,34 +41,59 @@ my %kb = (
     server_write_IV             => undef,
 );
 
+sub copy_pending {
+    my $ctx  = shift;
+    my $p    = $ctx->{pending};
+    my $copy = {
+        cipher             => $p->{cipher},
+        securityParameters => { %{ $p->{securityParameters} } },
+        tls_version        => $p->{tls_version},
+        session_id         => $p->{session_id},
+        compression        => $p->{compression},
+    };
+    delete $copy->{securityParameters}->{client_random};
+    delete $copy->{securityParameters}->{client_random};
+    $copy;
+}
+
+sub clear_pending {
+    my $ctx = shift;
+    $ctx->{pending} = {
+        securityParameters => {%sp},
+        key_block          => {%kb},
+        tls_version        => undef,
+        session_id         => undef,
+        cipher             => undef,
+        hs_messages        => [],
+        compression        => undef,
+    };
+    $ctx->{pending}->{securityParameters}->{connectionEnd} = $ctx->{type};
+}
+
 sub new {
     my ( $class, %args ) = @_;
-
-    my $self = bless {
-        crypto  => Protocol::TLS::Crypto->new,
-        pending => {
-            securityParameters => {%sp},
-            key_block          => {%kb},
-            tls_version        => undef,
-            session_id         => undef,
-            cipher             => undef,
-            hs_messages        => [],
-        },
-        current_decode => {},
-        current_encode => {},
-        session_id     => undef,
-        tls_version    => undef,
-        seq_read       => 0,            # 2^64-1
-        seq_write      => 0,            # 2^64-1
-        queue          => [],
-        state          => STATE_IDLE,
-    }, $class;
-    $self->load_extensions('ServerName');
-
     croak "Connection end type must be specified: CLIENT or SERVER"
       unless exists $args{type}
       && ( $args{type} == CLIENT
         || $args{type} == SERVER );
+
+    my $self = bless {
+        type           => $args{type},
+        crypto         => Protocol::TLS::Crypto->new,
+        proposed       => {},
+        pending        => {},
+        current_decode => {},
+        current_encode => {},
+        session_id     => undef,
+        tls_version    => undef,
+        seq_read       => 0,                            # 2^64-1
+        seq_write      => 0,                            # 2^64-1
+        queue          => [],
+        state          => STATE_IDLE,
+    }, $class;
+    $self->clear_pending;
+    $self->load_extensions('ServerName');
+
     $self->{pending}->{securityParameters}->{connectionEnd} = $args{type};
     $self->{pending}->{securityParameters}
       ->{ $args{type} == SERVER ? 'server_random' : 'client_random' } =
@@ -183,7 +208,9 @@ sub state_machine {
                 "Only ServerHello allowed at Handshake Start state\n");
             $ctx->error(UNEXPECTED_MESSAGE);
         }
-        elsif ( $ctx->{session_id} eq $ctx->{pending}->{session_id} ) {
+        elsif ( defined $ctx->{proposed}->{session_id}
+            && $ctx->{proposed}->{session_id} eq $ctx->{pending}->{session_id} )
+        {
             $ctx->state(STATE_SESS_RESUME);
         }
         else {
@@ -191,12 +218,26 @@ sub state_machine {
         }
     }
 
+    # STATE_SESS_RESUME
     elsif ( $prev_state == STATE_SESS_RESUME ) {
         if ( $c_type == CTYPE_HANDSHAKE ) {
             if ( $hs_type == HSTYPE_FINISHED ) {
-
-                #$ctx->state( STATE_HS_FULL )
+                $ctx->state(STATE_HS_RESUME);
             }
+        }
+        elsif ( $c_type == CTYPE_CHANGE_CIPHER_SPEC ) {
+            $ctx->change_cipher_spec($action);
+        }
+        else {
+            tracer->error("Unexpected Handshake type\n");
+            $ctx->error(UNEXPECTED_MESSAGE);
+        }
+    }
+
+    # STATE_HS_RESUME
+    elsif ( $prev_state == STATE_HS_RESUME ) {
+        if ( $c_type == CTYPE_HANDSHAKE && $hs_type == HSTYPE_FINISHED ) {
+            $ctx->state(STATE_OPEN);
         }
         elsif ( $c_type == CTYPE_CHANGE_CIPHER_SPEC ) {
             $ctx->change_cipher_spec($action);
@@ -252,7 +293,7 @@ sub state_machine {
         }
     }
 
-    # ReNegotiation
+    # TODO: ReNegotiation
     elsif ( $prev_state == STATE_OPEN ) {
 
     }
@@ -260,11 +301,13 @@ sub state_machine {
 
 sub generate_key_block {
     my $ctx = shift;
-    tracer->debug("Generating key block\n");
-    my $sp = $ctx->{pending}->{securityParameters};
-    my $kb = $ctx->{pending}->{key_block};
+    my $sp  = $ctx->{pending}->{securityParameters};
+    my $kb  = $ctx->{pending}->{key_block};
     ( my $da, $sp->{BulkCipherAlgorithm}, $sp->{MACAlgorithm} ) =
       cipher_type( $ctx->{pending}->{cipher} );
+
+    tracer->debug( "Generating key block for cipher "
+          . const_name( 'ciphers', $ctx->{pending}->{cipher} ) );
 
     $sp->{mac_length} = $sp->{mac_key_length} =
         $sp->{MACAlgorithm} eq 'SHA'    ? 20
@@ -349,42 +392,87 @@ sub state_cb {
 sub validate_server_hello {
     my ( $ctx, %h ) = @_;
     my $tls_v = is_tls_version( $h{version} );
-    my $p     = $ctx->{pending};
     if ( !defined $tls_v ) {
-        tracer->error("peer's TLS version $h{version} not supported\n");
+        tracer->error("server TLS version $h{version} not recognized\n");
+        $ctx->error(HANDSHAKE_FAILURE);
         return undef;
     }
+    my $p   = $ctx->{pending};
+    my $pro = $ctx->{proposed};
+
+    if ( $tls_v < $pro->{tls_version} ) {
+        tracer->error("server TLS version $tls_v are not supported\n");
+        $ctx->error(PROTOCOL_VERSION);
+        return undef;
+    }
+
+    if ( !grep { $h{compression} == $_ } @{ $pro->{compression} } ) {
+        tracer->error("server compression not supported\n");
+        $ctx->error(HANDSHAKE_FAILURE);
+        return undef;
+    }
+
+    if ( !grep { $h{cipher} == $_ } @{ $pro->{ciphers} } ) {
+        tracer->error("server cipher not accepted\n");
+        $ctx->error(HANDSHAKE_FAILURE);
+        return undef;
+    }
+
     $p->{tls_version}                             = $tls_v;
     $p->{securityParameters}->{server_random}     = $h{random};
     $p->{session_id}                              = $h{session_id};
-    $p->{securityParameters}->{CompressionMethod} = $h{compression};
-    $p->{cipher}                                  = $h{cipher};
+    $p->{securityParameters}->{CompressionMethod} = $p->{compression} =
+      $h{compression};
+    $p->{cipher} = $h{cipher};
     1;
 }
 
 sub validate_client_hello {
     my ( $ctx, %h ) = @_;
-    my $tls_v = is_tls_version( $h{version} );
-    my $p     = $ctx->{pending};
+    my $tls_v = is_tls_version( $h{tls_version} );
     if ( !defined $tls_v ) {
-        tracer->error("peer's TLS version $h{version} not supported\n");
+        tracer->error("client's TLS version $h{tls_version} not recognized\n");
+        $ctx->error(HANDSHAKE_FAILURE);
         return undef;
     }
-    $p->{tls_version}                             = $tls_v;
-    $p->{securityParameters}->{client_random}     = $h{random};
-    $p->{session_id}                              = $ctx->crypto->random(32);
-    $p->{securityParameters}->{CompressionMethod} = $h{compression}->[0];
+    my $p   = $ctx->{pending};
+    my $pro = $ctx->{proposed};
+
+    if ( $tls_v < $pro->{tls_version} ) {
+        tracer->error("client's TLS version $tls_v are not supported\n");
+        $ctx->error(PROTOCOL_VERSION);
+        return undef;
+    }
+
+    for my $c ( @{ $pro->{compression} } ) {
+        next unless grep { $c == $_ } @{ $h{compression} };
+        $p->{securityParameters}->{CompressionMethod} = $c;
+        last;
+    }
+
+    if ( !exists $p->{securityParameters}->{CompressionMethod} ) {
+        tracer->error("client's compression not supported\n");
+        $ctx->error(HANDSHAKE_FAILURE);
+        return undef;
+    }
+
+    $p->{tls_version}                         = $tls_v;
+    $p->{securityParameters}->{client_random} = $h{random};
+    $p->{session_id}                          = $h{session_id};
 
     # Choose first defined cipher
-    for my $cipher ( @{ $h{ciphers} } ) {
-        next unless cipher_type($cipher);
+    for my $cipher ( @{ $pro->{ciphers} } ) {
+        next unless grep { $cipher == $_ } @{ $h{ciphers} };
         $p->{cipher} = $cipher;
         last;
     }
+
     if ( !exists $p->{cipher} ) {
-        tracer->error("peer's ciphers not supported\n");
+        tracer->error("client's ciphers not supported\n");
+        $ctx->error(HANDSHAKE_FAILURE);
         return undef;
     }
+
     1;
 }
 
@@ -410,9 +498,43 @@ sub validate_client_key {
 
 }
 
+sub peer_finished {
+    my $ctx = shift;
+    $ctx->_finished( $ctx->{type} == CLIENT ? SERVER : CLIENT );
+}
+
+sub finished {
+    my $ctx = shift;
+    $ctx->_finished( $ctx->{type} == CLIENT ? CLIENT : SERVER );
+}
+
+sub _finished {
+    my ( $ctx, $type ) = @_;
+    $ctx->crypto->PRF(
+        $ctx->{pending}->{securityParameters}->{master_secret},
+        ( $type == CLIENT ? 'client' : 'server' ) . ' finished',
+        $ctx->crypto->PRF_hash( join '', @{ $ctx->{pending}->{hs_messages} } ),
+        12
+    );
+}
+
 sub validate_finished {
     my ( $ctx, $message ) = @_;
-    $ctx->{pending}->{finished} = $message;
+
+    my $p      = $ctx->{pending};
+    my $sp     = $p->{securityParameters};
+    my $crypto = $ctx->crypto;
+
+    my $finished = $ctx->peer_finished;
+    tracer->debug( "finished expected: " . bin2hex($finished) );
+    tracer->debug( "finished received: " . bin2hex($message) );
+
+    if ( $finished ne $message ) {
+        tracer->error("finished not match");
+        $ctx->error(HANDSHAKE_FAILURE);
+        return;
+    }
+    1;
 }
 
 1

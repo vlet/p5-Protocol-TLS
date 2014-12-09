@@ -7,11 +7,11 @@ use Protocol::TLS::Trace qw(tracer bin2hex);
 use Protocol::TLS::Context;
 use Protocol::TLS::Connection;
 use Protocol::TLS::Constants
-  qw(cipher_type const_name :versions :c_types :end_types :hs_types :state_types :alert_desc);
+  qw(cipher_type const_name :versions :ciphers :c_types :end_types :hs_types :state_types :alert_desc);
 
 sub new {
     my ( $class, %opts ) = @_;
-    my $self = bless {}, $class;
+    my $self = bless { %opts, sid => {}, }, $class;
     $self->_load_cert( delete $opts{cert_file} );
     $self->_load_priv_key( delete $opts{key_file} );
     $self;
@@ -25,10 +25,11 @@ sub _load_cert {
     open my $fh, '<', $file or croak "opening cert_file error: $!";
 
     # TODO: multiple certs
-    my ($cert) =
-      ( <$fh> =~
-/^-----BEGIN CERTIFICATE-----\r?\n(.+?\r?\n)-----END CERTIFICATE-----\r?\n/s
-      );
+    my ($cert) = (
+        <$fh> =~ /^-----BEGIN\x20CERTIFICATE-----\r?\n
+          (.+?\r?\n)
+          -----END\x20CERTIFICATE-----\r?\n/sx
+    );
     close $fh;
     croak "Certificate must be in PEM format" unless $cert;
     $self->{cert} = decode_base64($cert);
@@ -41,10 +42,11 @@ sub _load_priv_key {
 
     local $/;
     open my $fh, '<', $file or croak "opening key_file error: $!";
-    my ($key) =
-      ( <$fh> =~
-/^-----BEGIN RSA PRIVATE KEY-----\r?\n(.+?\r?\n)-----END RSA PRIVATE KEY-----\r?\n/s
-      );
+    my ($key) = (
+        <$fh> =~ /^-----BEGIN\x20RSA\x20PRIVATE\x20KEY-----\r?\n
+          (.+?\r?\n)
+          -----END\x20RSA\x20PRIVATE\x20KEY-----\r?\n/sx
+    );
     close $fh;
     croak "Private key must be in PEM format" unless $key;
     $self->{key} = decode_base64($key);
@@ -54,8 +56,16 @@ sub _load_priv_key {
 sub new_connection {
     my ( $self, %opts ) = @_;
     my $ctx = Protocol::TLS::Context->new( type => SERVER );
-    $ctx->{key}  = $self->{key};
-    $ctx->{cert} = $self->{cert};
+    $ctx->{key}      = $self->{key};
+    $ctx->{cert}     = $self->{cert};
+    $ctx->{proposed} = {
+        ciphers => [
+            TLS_RSA_WITH_AES_128_CBC_SHA, TLS_RSA_WITH_NULL_SHA256,
+            TLS_RSA_WITH_NULL_SHA,
+        ],
+        tls_version => TLS_v12,
+        compression => [0],
+    };
     my $con = Protocol::TLS::Connection->new($ctx);
 
     $ctx->{on_change_state} = sub {
@@ -73,65 +83,79 @@ sub new_connection {
     $ctx->state_cb(
         STATE_HS_START,
         sub {
-            my $ctx    = shift;
-            my $p      = $ctx->{pending};
-            my $sp     = $p->{securityParameters};
-            my $crypto = $ctx->crypto;
+            my $ctx = shift;
+            my $p   = $ctx->{pending};
+            my $sp  = $p->{securityParameters};
+            my $sid = $p->{session_id};
 
-            $ctx->enqueue(
-                [
-                    CTYPE_HANDSHAKE,
-                    HSTYPE_SERVER_HELLO,
-                    {
-                        server_random => $sp->{server_random},
-                        session_id    => $p->{session_id},
-                        cipher        => $p->{cipher},
-                        compr         => $sp->{CompressionMethod}
-                    }
-                ],
-                [ CTYPE_HANDSHAKE, HSTYPE_CERTIFICATE, $ctx->{cert} ],
-                [ CTYPE_HANDSHAKE, HSTYPE_SERVER_HELLO_DONE ]
-            );
+            # Resume session
+            if ( $sid ne '' && exists $self->{sid}->{$sid} ) {
+                my $s = $self->{sid}->{$sid};
+                $p->{tls_version} = $s->{tls_version};
+                $p->{cipher}      = $s->{cipher};
+                $sp->{$_}         = $s->{securityParameters}->{$_}
+                  for keys %{ $s->{securityParameters} };
+
+                # save sid as proposed
+                $ctx->{proposed}->{session_id} = $sid;
+                tracer->debug( "Resume session: " . bin2hex($sid) );
+
+                $ctx->enqueue(
+                    [
+                        CTYPE_HANDSHAKE,
+                        HSTYPE_SERVER_HELLO,
+                        {
+                            tls_version   => $p->{tls_version},
+                            server_random => $sp->{server_random},
+                            session_id    => $sid,
+                            cipher        => $p->{cipher},
+                            compression   => $sp->{CompressionMethod}
+                        }
+                    ]
+                );
+                $ctx->enqueue( [CTYPE_CHANGE_CIPHER_SPEC],
+                    [ CTYPE_HANDSHAKE, HSTYPE_FINISHED, $ctx->finished ] );
+            }
+
+            # New session
+            else {
+                $sid = $p->{session_id} = $ctx->crypto->random(32);
+                $ctx->enqueue(
+                    [
+                        CTYPE_HANDSHAKE,
+                        HSTYPE_SERVER_HELLO,
+                        {
+                            tls_version   => $p->{tls_version},
+                            server_random => $sp->{server_random},
+                            session_id    => $sid,
+                            cipher        => $p->{cipher},
+                            compression   => $sp->{CompressionMethod}
+                        }
+                    ],
+                    [ CTYPE_HANDSHAKE, HSTYPE_CERTIFICATE, $ctx->{cert} ],
+                    [ CTYPE_HANDSHAKE, HSTYPE_SERVER_HELLO_DONE ]
+                );
+            }
         }
     );
 
-    $ctx->state_cb(
-        STATE_HS_FULL,
+    $ctx->state_cb( STATE_HS_FULL,
         sub {
-            my $ctx    = shift;
-            my $p      = $ctx->{pending};
-            my $sp     = $p->{securityParameters};
-            my $crypto = $ctx->crypto;
+            my $ctx = shift;
+            $ctx->enqueue( [CTYPE_CHANGE_CIPHER_SPEC],
+                [ CTYPE_HANDSHAKE, HSTYPE_FINISHED, $ctx->finished ] );
+        }
+    );
 
-            my $mess = join( '', splice @{ $p->{hs_messages} }, 0, -1 );
-            my $finished = $crypto->PRF(
-                $sp->{master_secret},
-                "client finished",
-                $crypto->PRF_hash($mess), 12
-            );
-            tracer->debug( "finished: " . bin2hex($finished) . "\n" );
-            tracer->debug(
-                "finished client: " . bin2hex( $p->{finished} ) . "\n" );
+    $ctx->state_cb( STATE_OPEN,
+        sub {
+            my $ctx = shift;
+            my $p   = $ctx->{pending};
 
-            if ( $finished ne $p->{finished} ) {
-                tracer->error("client finished not match");
-                $ctx->error(HANDSHAKE_FAILURE);
-                return;
-            }
-
-            $mess .= shift @{ $p->{hs_messages} };
-
-            $ctx->enqueue(
-                [CTYPE_CHANGE_CIPHER_SPEC],
-                [
-                    CTYPE_HANDSHAKE,
-                    HSTYPE_FINISHED,
-                    $crypto->PRF(
-                        $sp->{master_secret},     "server finished",
-                        $crypto->PRF_hash($mess), 12
-                    )
-                ]
-            );
+            # add sid to server's cache
+            $self->{sid}->{ $p->{session_id} } = $ctx->copy_pending;
+            $ctx->clear_pending;
+            tracer->debug( "Save sid: " . bin2hex( $p->{session_id} ) );
 
             # Handle callbacks
             if ( exists $opts{on_handshake_finish} ) {
@@ -139,6 +163,7 @@ sub new_connection {
             }
         }
     );
+
     $con;
 }
 
