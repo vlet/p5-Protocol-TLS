@@ -1,7 +1,7 @@
 package Protocol::TLS::Trace;
 use strict;
 use warnings;
-use Time::HiRes qw( gettimeofday );
+use Time::HiRes qw(time);
 
 use Exporter qw(import);
 our @EXPORT_OK = qw(tracer bin2hex);
@@ -37,7 +37,7 @@ sub _log {
     my ( $self, $level, $message ) = @_;
     if ( $level >= $self->{min_level} ) {
         chomp($message);
-        my $now = +( join '.', gettimeofday );
+        my $now = time;
         if ( $now - $start_time < 60 ) {
             $message =~ s/\n/\n           /g;
             printf "[%05.3f] %s\n", $now - $start_time, $message;
