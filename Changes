@@ -2,6 +2,12 @@ Revision history for Perl extension Protocol-TLS
 
 {{$NEXT}}
 
+0.02 2014-12-09T21:52:19Z
+    - Fixed bug with fraction time in P::T::Trace
+    - Implemented support for TLS session resuming
+    - Improved validation of handshake records
+    - Implemented HELLO_REQUEST decoder/encoder
+
 0.01 2014-12-08T21:38:39Z
 
     - original version
