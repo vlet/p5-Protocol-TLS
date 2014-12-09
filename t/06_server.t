@@ -6,8 +6,6 @@ use TLSTest;
 use AnyEvent::Socket;
 use AnyEvent::Handle;
 
-#use Data::Dumper::Concise;
-
 BEGIN {
     use_ok 'Protocol::TLS::Server';
 }
@@ -57,8 +55,7 @@ subtest 'handshake' => sub {
                 $h->destroy;
                 print "that's all folks\n";
 
-                #print Dumper $server->{ctx};
-                $cv->send;
+                #$cv->send;
             },
         );
         $h->on_read(

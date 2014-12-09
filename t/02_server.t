@@ -36,7 +36,7 @@ subtest 'handshake decode' => sub {
             c02b # TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
             c02f # TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
             c00a # TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
-            000a # TLS_RSA_WITH_3DES_EDE_CBC_SHA
+            002f # TLS_RSA_WITH_AES_128_CBC_SHA
             0005 # TLS_RSA_WITH_RC4_128_SHA
             0004 # TLS_RSA_WITH_RC4_128_MD5
         01       # Compression Methods Length: 1
@@ -53,7 +53,7 @@ subtest 'handshake decode' => sub {
     $tls_srv->feed($data);
 
     my $p = $tls_srv->{ctx}->{pending};
-    is $p->{cipher}, 49195;
+    is $p->{cipher}, 0x2f;
 
     #is $hc->{extensions}->{0}->{0}, 'metacpan.org', "correct hostname";
     #note explain $tls_srv->{ctx};
