@@ -52,7 +52,7 @@ sub copy_pending {
         compression        => $p->{compression},
     };
     delete $copy->{securityParameters}->{client_random};
-    delete $copy->{securityParameters}->{client_random};
+    delete $copy->{securityParameters}->{server_random};
     $copy;
 }
 
