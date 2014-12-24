@@ -66,7 +66,7 @@ sub decode {
 
 sub encode {
     my ( $ctx, $type ) = splice @_, 0, 2;
-    my $encoded = pack 'CC n/a', $type, 0, $encoder{$type}->( $ctx, @_ );
+    my $encoded = pack 'CC n/a*', $type, 0, $encoder{$type}->( $ctx, @_ );
     push @{ $ctx->{pending}->{hs_messages} }, $encoded
       if $type != HSTYPE_HELLO_REQUEST;
     $encoded;
@@ -153,7 +153,7 @@ sub client_hello_encode {
     }
 
     pack(
-        'na32 C/a n'
+        'na32 C/a* n'
           . ( @{ $data_ref->{ciphers} } + 1 ) . 'C'
           . ( @{ $data_ref->{compression} } + 1 ),
         $data_ref->{tls_version},
@@ -207,7 +207,7 @@ sub server_hello_encode {
         # TODO extenions
     }
 
-    pack( "n a32 C/a n C",
+    pack( "n a32 C/a* n C",
         $data_ref->{tls_version}, $data_ref->{server_random},
         $data_ref->{session_id},  $data_ref->{cipher},
         $data_ref->{compression} )
@@ -247,7 +247,7 @@ sub certificate_encode {
 
     my $res = '';
     for my $cert (@_) {
-        $res .= pack 'C n/a', 0, $cert;
+        $res .= pack 'C n/a*', 0, $cert;
     }
 
     pack( 'Cn', 0, length($res) ) . $res;
@@ -302,7 +302,7 @@ sub client_key_exchange_decode {
 }
 
 sub client_key_exchange_encode {
-    pack 'n/a', $_[1];
+    pack 'n/a*', $_[1];
 }
 
 sub finished_encode {
