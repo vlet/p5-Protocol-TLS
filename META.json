@@ -4,7 +4,7 @@
       "Vladimir Lettiev <thecrux@gmail.com>"
    ],
    "dynamic_config" : 0,
-   "generated_by" : "Minilla/v2.2.0, CPAN::Meta::Converter version 2.142060",
+   "generated_by" : "Minilla/v2.3.0, CPAN::Meta::Converter version 2.142060",
    "license" : [
       "perl_5"
    ],
@@ -52,7 +52,8 @@
       "test" : {
          "requires" : {
             "AnyEvent" : "7.00",
-            "Test::More" : "0.98"
+            "Test::More" : "0.98",
+            "Test::TCP" : "2.06"
          }
       }
    },
@@ -68,6 +69,6 @@
          "web" : "https://github.com/vlet/p5-Protocol-TLS"
       }
    },
-   "version" : "0.02",
+   "version" : "0.03",
    "x_authority" : "cpan:CRUX"
 }

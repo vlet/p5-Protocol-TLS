@@ -2,6 +2,13 @@ Revision history for Perl extension Protocol-TLS
 
 {{$NEXT}}
 
+0.03 2014-12-29T15:15:10Z
+    - Fixed pack for perl < 5.8.9
+    - Added tls client/server scripts examples
+    - Updated test suite
+    - Don't trace CLOSE_NOTIFY as error
+    - Setup context's session_id and tls_version on successful handshake
+
 0.02 2014-12-09T21:52:19Z
     - Fixed bug with fraction time in P::T::Trace
     - Implemented support for TLS session resuming
