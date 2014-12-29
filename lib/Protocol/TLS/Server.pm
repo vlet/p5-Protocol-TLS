@@ -154,8 +154,10 @@ sub new_connection {
 
             # add sid to server's cache
             $self->{sid}->{ $p->{session_id} } = $ctx->copy_pending;
+            tracer->debug( "Saved sid: " . bin2hex( $p->{session_id} ) );
+            $ctx->{session_id}  = $p->{session_id};
+            $ctx->{tls_version} = $p->{tls_version};
             $ctx->clear_pending;
-            tracer->debug( "Save sid: " . bin2hex( $p->{session_id} ) );
 
             # Handle callbacks
             if ( exists $opts{on_handshake_finish} ) {

@@ -134,6 +134,9 @@ sub new_connection {
             # add sid to client's cache
             $self->{sid}->{$server_name}->{ $p->{session_id} } =
               $ctx->copy_pending;
+            tracer->debug( "Saved sid: " . bin2hex( $p->{session_id} ) );
+            $ctx->{session_id}  = $p->{session_id};
+            $ctx->{tls_version} = $p->{tls_version};
             $ctx->clear_pending;
 
             # Handle callbacks
