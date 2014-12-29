@@ -15,11 +15,12 @@ sub decode {
             "warning: " . const_name( 'alert_desc', $desc ) . "\n" );
     }
     elsif ( $alert == FATAL ) {
-        tracer->error( "fatal: " . const_name( 'alert_desc', $desc ) . "\n" );
         if ( $desc == CLOSE_NOTIFY ) {
             $ctx->close;
         }
         else {
+            tracer->error(
+                "fatal: " . const_name( 'alert_desc', $desc ) . "\n" );
             $ctx->shutdown(1);
         }
     }
