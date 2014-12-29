@@ -295,7 +295,7 @@ sub state_machine {
 
     # TODO: ReNegotiation
     elsif ( $prev_state == STATE_OPEN ) {
-
+        tracer->warning("ReNegotiation is not yet supported\n");
     }
 }
 
@@ -401,7 +401,7 @@ sub validate_server_hello {
     my $pro = $ctx->{proposed};
 
     if ( $tls_v < $pro->{tls_version} ) {
-        tracer->error("server TLS version $tls_v are not supported\n");
+        tracer->error("server TLS version $tls_v is not supported\n");
         $ctx->error(PROTOCOL_VERSION);
         return undef;
     }
@@ -431,7 +431,8 @@ sub validate_client_hello {
     my ( $ctx, %h ) = @_;
     my $tls_v = is_tls_version( $h{tls_version} );
     if ( !defined $tls_v ) {
-        tracer->error("client's TLS version $h{tls_version} not recognized\n");
+        tracer->error(
+            "client's TLS version $h{tls_version} is not recognized\n");
         $ctx->error(HANDSHAKE_FAILURE);
         return undef;
     }
@@ -439,7 +440,7 @@ sub validate_client_hello {
     my $pro = $ctx->{proposed};
 
     if ( $tls_v < $pro->{tls_version} ) {
-        tracer->error("client's TLS version $tls_v are not supported\n");
+        tracer->error("client's TLS version $tls_v is not supported\n");
         $ctx->error(PROTOCOL_VERSION);
         return undef;
     }
