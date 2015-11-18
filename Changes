@@ -2,6 +2,10 @@ Revision history for Perl extension Protocol-TLS
 
 {{$NEXT}}
 
+0.04 2015-11-18T15:35:25Z
+    - Implemented initial support for client certificate (client only)
+    - Support for record layer fragmentation
+
 0.03 2014-12-29T15:15:10Z
     - Fixed pack for perl < 5.8.9
     - Added tls client/server scripts examples
