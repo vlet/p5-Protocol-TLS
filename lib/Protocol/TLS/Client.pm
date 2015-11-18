@@ -3,14 +3,20 @@ use strict;
 use warnings;
 use Carp;
 use Protocol::TLS::Trace qw(tracer bin2hex);
+use Protocol::TLS::Utils qw(load_cert load_priv_key);
 use Protocol::TLS::Context;
 use Protocol::TLS::Connection;
 use Protocol::TLS::Constants qw(const_name :state_types :end_types :c_types
-  :versions :hs_types :ciphers cipher_type :alert_desc);
+  :versions :hs_types :ciphers cipher_type :alert_desc :hash_alg :sign_alg);
 
 sub new {
     my ( $class, %opts ) = @_;
-    my $self = bless { %opts, sid => {}, }, $class;
+    my $self = bless { %opts, sid => {} }, $class;
+    if ( exists $opts{cert_file} && exists $opts{key_file} ) {
+        $self->{cert} = load_cert( $opts{cert_file} );
+        $self->{key}  = load_priv_key( $opts{key_file} );
+    }
+    $self;
 }
 
 sub new_connection {
@@ -18,6 +24,9 @@ sub new_connection {
     croak "Specify server name of host" unless defined $server_name;
 
     my $ctx = Protocol::TLS::Context->new( type => CLIENT );
+    $ctx->{key}  = $self->{key}  if exists $self->{key};
+    $ctx->{cert} = $self->{cert} if exists $self->{cert};
+
     my $con = Protocol::TLS::Connection->new($ctx);
 
     # Grab random session_id from cache (if exists)
@@ -74,6 +83,16 @@ sub new_connection {
 
             my $pub_key = $crypto->cert_pubkey( $p->{cert}->[0] );
 
+            if ( exists $p->{client_cert} ) {
+                $ctx->enqueue(
+                    [
+                        CTYPE_HANDSHAKE,
+                        HSTYPE_CERTIFICATE,
+                        exists $ctx->{cert} ? $ctx->{cert} : ()
+                    ]
+                );
+            }
+
             my ( $da, $ca, $mac ) = cipher_type( $p->{cipher} );
 
             if ( $da eq 'RSA' ) {
@@ -93,6 +112,51 @@ sub new_connection {
             }
             else {
                 die "not implemented";
+            }
+
+            if ( exists $p->{client_cert} && exists $ctx->{cert} ) {
+                my ( $sign, $hash_n, $alg_n, $hash, $alg );
+
+                $alg = $crypto->cert_pubkeyalg( $ctx->{cert} );
+
+                if ( $alg && exists &{"SIGN_$alg"} ) {
+                    no strict 'refs';
+                    $alg_n = &{"SIGN_$alg"};
+                }
+                elsif ($alg) {
+                    die "algotithm $alg not implemented";
+                }
+                else {
+                    die "cert error";
+                }
+
+                my $sah = $p->{client_cert}->{sah};
+
+                for my $i ( 0 .. @$sah / 2 - 1 ) {
+                    if ( $sah->[ $i * 2 + 1 ] == $alg_n ) {
+                        $hash_n = $sah->[ $i * 2 ];
+                        $hash = const_name( 'hash_alg', $sah->[ $i * 2 ] );
+                        $hash =~ s/HASH_//;
+                        tracer->debug("Selected $alg, $hash");
+                        last;
+                    }
+                }
+
+                if ( $alg eq 'RSA' ) {
+                    $sign = $crypto->rsa_sign( $ctx->{key}, $hash,
+                        join '', @{ $p->{hs_messages} } );
+                }
+                else {
+                    die "algotithm $alg not implemented";
+                }
+
+                $ctx->enqueue(
+                    [
+                        CTYPE_HANDSHAKE, HSTYPE_CERTIFICATE_VERIFY,
+                        $hash_n,         $alg_n,
+                        $sign
+                    ]
+                );
             }
 
             $ctx->enqueue( [CTYPE_CHANGE_CIPHER_SPEC],
@@ -134,7 +198,7 @@ sub new_connection {
             # add sid to client's cache
             $self->{sid}->{$server_name}->{ $p->{session_id} } =
               $ctx->copy_pending;
-            tracer->debug( "Saved sid: " . bin2hex( $p->{session_id} ) );
+            tracer->debug( "Saved sid:\n" . bin2hex( $p->{session_id} ) );
             $ctx->{session_id}  = $p->{session_id};
             $ctx->{tls_version} = $p->{tls_version};
             $ctx->clear_pending;
@@ -250,6 +314,67 @@ Protocol::TLS::Client - pure Perl TLS Client
 
 Protocol::TLS::Client is TLS client library. It's intended to make TLS-client
 implementations on top of your favorite event loop.
+
+=head1 METHODS
+
+=head2 new
+
+Initialize new client object
+
+    my $client = Procotol::TLS::Client->new( %options );
+
+Availiable options:
+
+=over
+
+=item cert_file => /path/to/cert.crt
+
+Path to client certificate to perform client to server authentication
+
+=item key_file => /path/to/cert.key
+
+Path to private key for client certificate
+
+=back
+
+=head2 new_connection
+
+Create new TLS-connection object
+
+    my $con = $client->new_connection( 'F.Q.D.N', %options );
+
+'F.Q.D.N' - fully qualified domain name
+
+%options  - options hash
+
+Availiable options:
+
+=over
+
+=item on_handshake_finish => sub { ... }
+
+Callback invoked when TLS handshake completed
+
+    on_handshake_finish => sub {
+        my ($tls) = @_;
+
+        # Send some application data
+        $tls->send("hi there\n");
+    },
+
+=item on_data => sub { ... }
+
+Callback executed when application data received
+
+    on_data => sub {
+        my ( $tls, $data ) = @_;
+        print $data;
+
+        # send close notify and close application level connection
+        $tls->close;
+    }
+
+=back
 
 =head1 LICENSE
 
