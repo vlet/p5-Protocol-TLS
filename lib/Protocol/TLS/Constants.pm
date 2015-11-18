@@ -83,6 +83,29 @@ use constant {
     NO_RENEGOTIATION            => 100,
     UNSUPPORTED_EXTENSION       => 110,
 
+    # Hash Algorithm
+    HASH_NONE   => 0,
+    HASH_MD5    => 1,
+    HASH_SHA1   => 2,
+    HASH_SHA224 => 3,
+    HASH_SHA256 => 4,
+    HASH_SHA384 => 5,
+    HASH_SHA512 => 6,
+
+    # Signature Algorithm
+    SIGN_ANONYMOUS => 0,
+    SIGN_RSA       => 1,
+    SIGN_DSA       => 2,
+    SIGN_ECDSA     => 64,
+
+    # Client Certificate Type
+    RSA_SIGN                  => 1,
+    DSS_SIGN                  => 2,
+    RSA_FIXED_DH              => 3,
+    DSS_FIXED_DH              => 4,
+    RSA_EPHEMERAL_DH_RESERVED => 5,
+    DSS_EPHEMERAL_DH_RESERVED => 6,
+    FORTEZZA_DMS_RESERVED     => 20,
 };
 
 require Exporter;
@@ -122,7 +145,16 @@ our %EXPORT_TAGS = (
           DECODE_ERROR DECRYPT_ERROR EXPORT_RESTRICTION_RESERVED PROTOCOL_VERSION
           INSUFFICIENT_SECURITY INTERNAL_ERROR USER_CANCELED NO_RENEGOTIATION
           UNSUPPORTED_EXTENSION)
-    ]
+    ],
+    hash_alg => [
+        qw( HASH_NONE HASH_MD5 HASH_SHA1 HASH_SHA224 HASH_SHA256 HASH_SHA384
+          HASH_SHA512 )
+    ],
+    sign_alg       => [qw( SIGN_ANONYMOUS SIGN_RSA SIGN_DSA SIGN_ECDSA )],
+    client_c_types => [
+        qw( RSA_SIGN DSS_SIGN RSA_FIXED_DH DSS_FIXED_DH RSA_EPHEMERAL_DH_RESERVED
+          DSS_EPHEMERAL_DH_RESERVED FORTEZZA_DMS_RESERVED )
+    ],
 );
 
 my ( %reverse, %ciphers );
