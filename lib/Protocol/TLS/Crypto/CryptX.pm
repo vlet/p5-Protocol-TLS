@@ -71,9 +71,20 @@ sub rsa_decrypt {
     $priv->decrypt( $message, 'v1.5' );
 }
 
+sub rsa_sign {
+    my ( $self, $der, $hash, $message ) = @_;
+    my $priv = Crypt::PK::RSA->new( \$der );
+    $priv->sign_message( $message, $hash, 'v1.5' );
+}
+
 sub cert_pubkey {
     my $cert = Crypt::X509->new( cert => $_[1] );
     $cert ? $cert->pubkey : undef;
+}
+
+sub cert_pubkeyalg {
+    my $cert = Crypt::X509->new( cert => $_[1] );
+    $cert ? $cert->PubKeyAlg : undef;
 }
 
 1
