@@ -6,7 +6,7 @@ use Protocol::TLS::Client;
 
 # openssl s_server -accept 4443 -cert test.crt -key test.key -debug
 
-my $client = Protocol::TLS::Client->new( version => 'TLSv12' );
+my $client = Protocol::TLS::Client->new( version => 'TLSv12', @ARGV );
 
 my $cv = AE::cv;
 
