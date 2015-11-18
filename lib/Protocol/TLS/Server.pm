@@ -4,6 +4,7 @@ use warnings;
 use Carp;
 use MIME::Base64;
 use Protocol::TLS::Trace qw(tracer bin2hex);
+use Protocol::TLS::Utils qw(load_cert load_priv_key);
 use Protocol::TLS::Context;
 use Protocol::TLS::Connection;
 use Protocol::TLS::Constants
@@ -11,46 +12,10 @@ use Protocol::TLS::Constants
 
 sub new {
     my ( $class, %opts ) = @_;
-    my $self = bless { %opts, sid => {}, }, $class;
-    $self->_load_cert( delete $opts{cert_file} );
-    $self->_load_priv_key( delete $opts{key_file} );
+    my $self = bless { %opts, sid => {} }, $class;
+    $self->{cert} = load_cert( $opts{cert_file} );
+    $self->{key}  = load_priv_key( $opts{key_file} );
     $self;
-}
-
-sub _load_cert {
-    my ( $self, $file ) = @_;
-    croak "specify cert_file path" unless defined $file;
-
-    local $/;
-    open my $fh, '<', $file or croak "opening cert_file error: $!";
-
-    # TODO: multiple certs
-    my ($cert) = (
-        <$fh> =~ /^-----BEGIN\x20CERTIFICATE-----\r?\n
-          (.+?\r?\n)
-          -----END\x20CERTIFICATE-----\r?\n/sx
-    );
-    close $fh;
-    croak "Certificate must be in PEM format" unless $cert;
-    $self->{cert} = decode_base64($cert);
-    ();
-}
-
-sub _load_priv_key {
-    my ( $self, $file ) = @_;
-    croak "specify key_file path" unless defined $file;
-
-    local $/;
-    open my $fh, '<', $file or croak "opening key_file error: $!";
-    my ($key) = (
-        <$fh> =~ /^-----BEGIN\x20RSA\x20PRIVATE\x20KEY-----\r?\n
-          (.+?\r?\n)
-          -----END\x20RSA\x20PRIVATE\x20KEY-----\r?\n/sx
-    );
-    close $fh;
-    croak "Private key must be in PEM format" unless $key;
-    $self->{key} = decode_base64($key);
-    ();
 }
 
 sub new_connection {
