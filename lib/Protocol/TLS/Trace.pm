@@ -37,17 +37,21 @@ sub _log {
     my ( $self, $level, $message ) = @_;
     if ( $level >= $self->{min_level} ) {
         chomp($message);
+        my @caller = map { s/Protocol::TLS:://; $_ }
+          ( ( caller(2) )[3], ( caller(1) )[2] );
         my $now = time;
         if ( $now - $start_time < 60 ) {
             $message =~ s/\n/\n           /g;
-            printf "[%05.3f] %s\n", $now - $start_time, $message;
+            printf "[%05.3f] [%s:%s] %s\n", $now - $start_time, @caller,
+              $message;
         }
         else {
             my @t = ( localtime() )[ 5, 4, 3, 2, 1, 0 ];
             $t[0] += 1900;
             $t[1]++;
             $message =~ s/\n/\n                      /g;
-            printf "[%4d-%02d-%02d %02d:%02d:%02d] %s\n", @t, $message;
+            printf "[%4d-%02d-%02d %02d:%02d:%02d] [%s:%s] %s\n", @t,
+              @caller, $message;
             $start_time = $now;
         }
     }
