@@ -33,14 +33,8 @@ sub decode {
     my ( $type, $length_high, $length_low ) = unpack "x${buf_offset}CCn",
       $$buf_ref;
 
-    # Incorrect handshake record length
-    if ( $length_high * 256**3 + $length_low != $length - 4 ) {
-        tracer->debug( "Incorrect handshake record length: "
-              . ( $length_high * 256**3 + $length_low )
-              . " (expected $length)\n" );
-        $ctx->error(DECODE_ERROR);
-        return undef;
-    }
+    my $h_len = $length_high * 256**3 + $length_low;
+    return 0 if $h_len > $length - 4;
 
     # Unknown handshake type
     if ( !exists $handshake_types{$type} ) {
@@ -50,18 +44,18 @@ sub decode {
     }
     tracer->debug( 'Got ' . const_name( 'hs_types', $type ) . "\n" );
 
-    my $len = $decoder{$type}->( $ctx, $buf_ref, $buf_offset + 4, $length - 4 );
+    my $len = $decoder{$type}->( $ctx, $buf_ref, $buf_offset + 4, $h_len );
     return undef unless defined $len;
 
     # Save handshake data
     push @{ $ctx->{pending}->{hs_messages} }, substr $$buf_ref, $buf_offset,
-      $length
+      $h_len + 4
       if $type != HSTYPE_HELLO_REQUEST;
 
     # Arrived record may change state of stream
     $ctx->state_machine( 'recv', CTYPE_HANDSHAKE, $type );
 
-    return $length;
+    return $h_len + 4;
 }
 
 sub encode {
@@ -262,7 +256,44 @@ sub server_key_exchange_encode {
 }
 
 sub certificate_request_decode {
-    die "not implemented";
+    my ( $ctx, $buf_ref, $buf_offset, $length ) = @_;
+
+    # Client certificate types
+    my @cct = unpack "x$buf_offset C/C*", $$buf_ref;
+
+    my $offset = @cct + 1;
+
+    # Signature and hash algorithms
+    my @sah = unpack 'x' . ( $buf_offset + $offset ) . 'n/C*', $$buf_ref;
+
+    $offset += @sah + 2;
+
+    # DistinguishedName certificate_authorities
+    my $dn_len = unpack 'x' . ( $buf_offset + $offset ) . 'n', $$buf_ref;
+    $offset += 2;
+    my @dn;
+
+    while ( $offset < $length ) {
+        my $dn = unpack 'x' . ( $buf_offset + $offset ) . 'n/a*', $$buf_ref;
+        last unless $dn;
+        $offset += 2 + length($dn);
+        push @dn, $dn;
+    }
+
+    if ( $offset != $length ) {
+        tracer->debug( "certificate request decoding error:"
+              . "expected length $length != $offset" );
+        $ctx->error(DECODE_ERROR);
+        return undef;
+    }
+
+    $ctx->{pending}->{client_cert} = {
+        cct => [@cct],
+        sah => [@sah],
+        dn  => [@dn],
+    };
+
+    $offset;
 }
 
 sub certificate_request_encode {
@@ -277,7 +308,11 @@ sub server_hello_done_encode {
     '';
 }
 
-sub certificate_verify {
+sub certificate_verify_encode {
+    pack 'C2n/a', $_[1], $_[2], $_[3];
+}
+
+sub certificate_verify_decode {
     die "not implemented";
 }
 
