@@ -90,6 +90,7 @@ sub new {
         seq_write      => 0,                            # 2^64-1
         queue          => [],
         state          => STATE_IDLE,
+        fragment       => '',
     }, $class;
     $self->clear_pending;
     $self->load_extensions('ServerName');

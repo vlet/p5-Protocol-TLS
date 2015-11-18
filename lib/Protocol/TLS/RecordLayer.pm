@@ -64,9 +64,24 @@ sub record_decode {
 
     return undef unless defined $decompressed;
 
-    return undef
-      unless defined $decoder{$type}
-      ->( $ctx, \$decompressed, 0, length $decompressed );
+    $ctx->{fragment} .= $decompressed;
+    my $f_len  = length $ctx->{fragment};
+    my $offset = 0;
+
+    while ( $offset < $f_len ) {
+        my $readed_len = $decoder{$type}
+          ->( $ctx, \$ctx->{fragment}, $offset, $f_len - $offset );
+        return undef unless defined $readed_len;
+        last unless $readed_len;
+        $offset += $readed_len;
+    }
+
+    if ( $f_len == $offset ) {
+        $ctx->{fragment} = '';
+    }
+    else {
+        substr $ctx->{fragment}, 0, $offset, '';
+    }
 
     return 5 + $length;
 }
